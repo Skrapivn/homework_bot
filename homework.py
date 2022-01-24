@@ -1,3 +1,4 @@
+from http import HTTPStatus
 import logging
 import os
 import sys
@@ -16,12 +17,12 @@ PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-RETRY_TIME = 600
+RETRY_TIME = 10
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
 
-HOMEWORK_STATUSES = {
+HOMEWORK_VERDICTS = {
     'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
     'reviewing': 'Работа взята на проверку ревьюером.',
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
@@ -45,9 +46,8 @@ def send_message(bot, message):
             text=message,
         )
         logger.info('Сообщение успешно отправлено')
-    except telegram.error as err:
+    except telegram.error:
         logger.error('Сбой отправки сообщения в телеграмм')
-        raise err('Сбой отправки сообщения в телеграмм')
 
 
 def get_api_answer(current_timestamp):
@@ -60,7 +60,7 @@ def get_api_answer(current_timestamp):
         raise err(
             'Ошибка отправки запроса на сервер API: ', err
         )
-    if response.status_code != 200:
+    if response.status_code != HTTPStatus.OK:
         logger.error(f'ENDPOINT недоступен код: {response.status_code}')
         raise ServerApiError(
             f'Сервер недоступен код: {response.status_code}'
@@ -74,7 +74,8 @@ def get_api_answer(current_timestamp):
 
 def check_response(response):
     """Проверяет ответ API."""
-    if ('homeworks' in response
+    if (isinstance(response, dict)
+       and 'homeworks' in response
        and isinstance(response['homeworks'], list)):
         return response['homeworks']
     raise ApiResponseError('Неверный формат ответа API')
@@ -84,10 +85,10 @@ def parse_status(homework):
     """Выгрузка статуса из ответа API."""
     homework_name = homework['homework_name']
     homework_status = homework['status']
-    if homework_status not in HOMEWORK_STATUSES:
+    if homework_status not in HOMEWORK_VERDICTS:
         logger.error('Найден новый статус, отсутствующий в списке!')
         raise Exception('Некорректные данные по статусу ДЗ')
-    verdict = HOMEWORK_STATUSES.get(homework_status)
+    verdict = HOMEWORK_VERDICTS.get(homework_status)
     logger.info(f'Вердикт проекта {verdict}')
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
@@ -112,6 +113,7 @@ def main():
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     current_timestamp = 0
     error_log = None
+    message_log = None
 
     if check_tokens() is False:
         sys.exit(logger.critical('Отсутствие обязательных переменных. '
@@ -121,8 +123,11 @@ def main():
             response = get_api_answer(current_timestamp)
             homework = check_response(response)
             if homework != []:
-                logger.debug('Отправка сообщения')
-                send_message(bot, parse_status(homework[0]))
+                message = parse_status(homework[0])
+                if message_log != message:
+                    message_log = message
+                    logger.debug('Отправка сообщения')
+                    send_message(bot, message)
             else:
                 logger.debug('Нет нового статуса ДЗ')
 
@@ -137,8 +142,6 @@ def main():
                 send_message(bot, message)
             else:
                 logger.debug(f'Ошибка {message} уже существует')
-            time.sleep(RETRY_TIME)
-        else:
             time.sleep(RETRY_TIME)
 
 
