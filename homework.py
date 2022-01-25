@@ -55,7 +55,7 @@ def get_api_answer(current_timestamp):
     params = {'from_date': current_timestamp}
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=params)
-    except requests.exceptions.RequestException as err:
+    except Exception as err:
         logger.error(f'Ошибка отправки запроса {err}')
         raise err(
             'Ошибка отправки запроса на сервер API: ', err
@@ -85,6 +85,8 @@ def parse_status(homework):
     """Выгрузка статуса из ответа API."""
     homework_name = homework['homework_name']
     homework_status = homework['status']
+    if homework_name and homework_status is None:
+        raise KeyError('Ошибка в получении статуса ответа API')
     if homework_status not in HOMEWORK_VERDICTS:
         logger.error('Найден новый статус, отсутствующий в списке!')
         raise Exception('Некорректные данные по статусу ДЗ')
